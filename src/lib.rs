@@ -132,7 +132,7 @@ impl Builder {
             orientation: UnitQuaternion::identity(),
             accel_bias: Vector3::zeros(),
             rot_bias: Vector3::zeros(),
-            gravity: Vector3::new(0f32, 0f32, -9.81),
+            gravity: Vector3::new(0f32, 0f32, 9.81),
             covariance: MatrixN::<f32, U18>::identity() * self.process_covariance,
             var_acc: self.var_acc,
             var_rot: self.var_rot,
@@ -181,10 +181,33 @@ pub struct ESKF {
 }
 
 impl ESKF {
-
     /// Create a symmetric variance matrix based on a single variance element
     pub fn symmetric_variance(var: f32) -> Matrix3<f32> {
         Matrix3::from_diagonal_element(var)
+    }
+
+    /// Get the uncertainty of the position estimate
+    pub fn position_uncertainty(&self) -> Vector3<f32> {
+        self.covariance
+            .diagonal()
+            .fixed_slice::<U3, U1>(0, 0)
+            .clone_owned()
+    }
+
+    /// Get the uncertainty of the velocity estimate
+    pub fn velocity_uncertainty(&self) -> Vector3<f32> {
+        self.covariance
+            .diagonal()
+            .fixed_slice::<U3, U1>(3, 0)
+            .clone_owned()
+    }
+
+    /// Get the uncertainty of the orientation estimate
+    pub fn orientation_uncertainty(&self) -> Vector3<f32> {
+        self.covariance
+            .diagonal()
+            .fixed_slice::<U3, U1>(3, 0)
+            .clone_owned()
     }
 
     /// Updated the filter, predicting the new state, based on measured acceleration and rotation
@@ -193,8 +216,9 @@ impl ESKF {
         let rot_acc_grav = self
             .orientation
             .transform_vector(&(acceleration - self.accel_bias))
-            - self.gravity;
+            + self.gravity;
         let norm_rot = UnitQuaternion::from_scaled_axis((rotation - self.rot_bias) * delta_t);
+        let orient_mat = self.orientation.to_rotation_matrix().into_inner();
         // Update internal state kinematics
         self.position += self.velocity * delta_t + 0.5 * rot_acc_grav * delta_t.powi(2);
         self.velocity += rot_acc_grav * delta_t;
@@ -203,7 +227,6 @@ impl ESKF {
         // Propagate uncertainty, since we have not observed any new information about the state of
         // the filter we need to update our estimate of the uncertainty of the filer
         let ident_delta = Matrix3::<f32>::identity() * delta_t;
-        let orient_mat = self.orientation.to_rotation_matrix().into_inner();
         let mut error_jacobian = MatrixN::<f32, U18>::identity();
         error_jacobian
             .fixed_slice_mut::<U3, U3>(0, 3)
@@ -219,7 +242,7 @@ impl ESKF {
             .copy_from(&ident_delta);
         error_jacobian
             .fixed_slice_mut::<U3, U3>(6, 6)
-            .copy_from(&(orient_mat.transpose() * norm_rot.to_rotation_matrix()));
+            .copy_from(&norm_rot.to_rotation_matrix().into_inner().transpose());
         error_jacobian
             .fixed_slice_mut::<U3, U3>(6, 12)
             .copy_from(&-ident_delta);
@@ -284,7 +307,7 @@ impl ESKF {
             let mut g = MatrixN::<f32, U18>::identity();
             g.fixed_slice_mut::<U3, U3>(6, 6)
                 .sub_assign(0.5 * skew(&error_state.fixed_slice::<U3, U1>(6, 0).clone_owned()));
-            self.covariance = self.covariance * g * self.covariance.transpose();
+            self.covariance = g * self.covariance * g.transpose();
         }
     }
 
