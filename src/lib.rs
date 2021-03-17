@@ -12,7 +12,7 @@
 //! ## Usage
 //! ```
 //! use eskf;
-//! use nalgebra::Vector3;
+//! use nalgebra::{Vector3, Point3};
 //! use std::time::Duration;
 //!
 //! // Create a default filter, modelling a perfect IMU without drift
@@ -24,9 +24,14 @@
 //! filter.predict(imu_acceleration, imu_rotation, Duration::from_millis(1000));
 //! // Check the new state of the filter
 //! // filter.position or filter.velocity...
+//! // ...
+//! // After some time we get an observation of the actual state
+//! filter.observe_position(Point3::new(0.0, 0.0, 0.0), eskf::ESKF::symmetric_variance(0.1));
+//! // Since we have supplied an observation of the actual state of the filter the states have now
+//! // been updated. The uncertainty of the filter is also updated to reflect this new information.
 //! ```
-use nalgebra::{Matrix3, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
-use std::ops::AddAssign;
+use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
+use std::ops::{AddAssign, SubAssign};
 use std::time::Duration;
 
 /// Builder for [`ESKF`]
@@ -138,6 +143,17 @@ impl Builder {
 }
 
 /// Error State Kalman Filter
+///
+/// The filter works by calling [`predict`](ESKF::predict) and one or more of the `observe_`
+/// methods when data is available.
+///
+/// The [`predict`](ESKF::predict) step updates the internal state of the filter based on measured
+/// acceleration and rotation coming from an IMU. This step updates the states in the filter based
+/// on kinematic motion while increasing the uncertainty of the filter. When one of the `observe_`
+/// methods are called, the filter updates the internal state based on this observation, which
+/// exposes the error state to the filter, which we can then use to correct the internal state. The
+/// uncertainty of the filter is also updated to reflect the variance of the observation and the
+/// updated state.
 #[derive(Copy, Clone, Debug)]
 pub struct ESKF {
     /// Estimated position in filter
@@ -165,6 +181,12 @@ pub struct ESKF {
 }
 
 impl ESKF {
+
+    /// Create a symmetric variance matrix based on a single variance element
+    pub fn symmetric_variance(var: f32) -> Matrix3<f32> {
+        Matrix3::from_diagonal_element(var)
+    }
+
     /// Updated the filter, predicting the new state, based on measured acceleration and rotation
     pub fn predict(&mut self, acceleration: Vector3<f32>, rotation: Vector3<f32>, delta: Duration) {
         let delta_t = delta.as_secs_f32();
@@ -218,6 +240,87 @@ impl ESKF {
             .add_assign(self.var_rot_bias * delta_t);
         self.covariance.set_diagonal(&diagonal);
     }
+
+    /// Internal update method to update the filter from a single measurement
+    fn update3(
+        &mut self,
+        jacobian: MatrixMN<f32, U3, U18>,
+        difference: Vector3<f32>,
+        variance: Matrix3<f32>,
+    ) {
+        // Correct filter based on Kalman gain
+        let kalman_gain = self.covariance
+            * jacobian.transpose()
+            * (jacobian * self.covariance * jacobian.transpose() + variance)
+                .try_inverse()
+                .expect("Could not invert Kalman gain");
+        let error_state = kalman_gain * difference;
+        // Update the covariance based on the observed filter state
+        if cfg!(feature = "cov-symmetric") {
+            self.covariance -= kalman_gain
+                * (jacobian * self.covariance * jacobian.transpose() + variance)
+                * kalman_gain.transpose();
+        } else if cfg!(feature = "cov-joseph") {
+            let step1 = MatrixN::<f32, U18>::identity() - kalman_gain * jacobian;
+            let step2 = kalman_gain * variance * kalman_gain.transpose();
+            self.covariance = step1 * self.covariance * step1.transpose() + step2;
+        } else {
+            self.covariance =
+                (MatrixN::<f32, U18>::identity() - kalman_gain * jacobian) * self.covariance;
+        }
+        // Inject error state into nominal
+        self.position += error_state.fixed_slice::<U3, U1>(0, 0);
+        self.velocity += error_state.fixed_slice::<U3, U1>(3, 0);
+        self.orientation *=
+            UnitQuaternion::from_scaled_axis(error_state.fixed_slice::<U3, U1>(6, 0));
+        self.accel_bias += error_state.fixed_slice::<U3, U1>(9, 0);
+        self.rot_bias += error_state.fixed_slice::<U3, U1>(12, 0);
+        self.gravity += error_state.fixed_slice::<U3, U1>(15, 0);
+        // Perform full ESKF reset
+        //
+        // Since the orientation error is usually relatively small this step can be skipped, but
+        // the full formulation can lead to better stability of the filter
+        if cfg!(feature = "full-reset") {
+            let mut g = MatrixN::<f32, U18>::identity();
+            g.fixed_slice_mut::<U3, U3>(6, 6)
+                .sub_assign(0.5 * skew(&error_state.fixed_slice::<U3, U1>(6, 0).clone_owned()));
+            self.covariance = self.covariance * g * self.covariance.transpose();
+        }
+    }
+
+    /// Update the filter with an observation of the position
+    pub fn observe_position(&mut self, measurement: Point3<f32>, variance: Matrix3<f32>) {
+        let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U3, U3>(0, 0)
+            .fill_with_identity();
+        let diff = measurement - self.position;
+        self.update3(jacobian, diff, variance);
+    }
+
+    /// Update the filter with an observation of the velocity
+    pub fn observe_velocity(&mut self, measurement: Vector3<f32>, variance: Matrix3<f32>) {
+        let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U3, U3>(0, 3)
+            .fill_with_identity();
+        let diff = measurement - self.velocity;
+        self.update3(jacobian, diff, variance);
+    }
+
+    /// Update the filter with an observation of the orientation
+    pub fn observe_orientation(
+        &mut self,
+        measurement: UnitQuaternion<f32>,
+        variance: Matrix3<f32>,
+    ) {
+        let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U3, U3>(0, 6)
+            .fill_with_identity();
+        let diff = measurement * self.orientation;
+        self.update3(jacobian, diff.scaled_axis(), variance);
+    }
 }
 
 /// Create the skew-symmetric matrix from a vector
@@ -233,8 +336,8 @@ mod test {
     use super::Builder;
     use approx::assert_relative_eq;
     use nalgebra::{Point3, UnitQuaternion, Vector3};
-    use std::time::Duration;
     use std::f32::consts::FRAC_PI_2;
+    use std::time::Duration;
 
     #[test]
     fn creation() {
@@ -284,21 +387,19 @@ mod test {
             Vector3::new(FRAC_PI_2, 0.0, 0.0),
             Duration::from_millis(1000),
         );
-        let (roll, pitch, yaw) = filter.orientation.euler_angles();
-        // Conversion to Euler angles are notoriously difficult, that is why we allow a much lower
-        // epsilon for rotation
-        assert_relative_eq!(roll, FRAC_PI_2, epsilon=1e-3);
-        assert_relative_eq!(pitch, 0.0);
-        assert_relative_eq!(yaw, 0.0);
+        assert_relative_eq!(
+            filter.orientation,
+            UnitQuaternion::from_euler_angles(FRAC_PI_2, 0.0, 0.0)
+        );
         filter.predict(
             Vector3::zeros(),
             Vector3::new(-FRAC_PI_2, 0.0, 0.0),
             Duration::from_millis(1000),
         );
-        let (roll, pitch, yaw) = filter.orientation.euler_angles();
-        assert_relative_eq!(roll, 0.0);
-        assert_relative_eq!(pitch, 0.0);
-        assert_relative_eq!(yaw, 0.0);
+        assert_relative_eq!(
+            filter.orientation,
+            UnitQuaternion::from_euler_angles(0.0, 0.0, 0.0)
+        );
         // We reset the filter here so that the following equalities are not affected by existing
         // motion in the filter
         let mut filter = Builder::new().build();
@@ -307,11 +408,9 @@ mod test {
             Vector3::new(0.0, -FRAC_PI_2, 0.0),
             Duration::from_millis(1000),
         );
-        let (roll, pitch, yaw) = filter.orientation.euler_angles();
-        assert_relative_eq!(roll, 0.0);
-        // Conversion to Euler angles are notoriously difficult, that is why we allow a much lower
-        // epsilon for rotation
-        assert_relative_eq!(pitch, -FRAC_PI_2, epsilon=1e-3);
-        assert_relative_eq!(yaw, 0.0);
+        assert_relative_eq!(
+            filter.orientation,
+            UnitQuaternion::from_euler_angles(0.0, -FRAC_PI_2, 0.0)
+        );
     }
 }
