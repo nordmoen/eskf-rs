@@ -5,9 +5,11 @@ authors = ["Jørgen Nordmoen <jorgen@nordmoen.net>"]
 description = "Navigation filter based on an Error State Kalman Filter (ESKF)"
 keywords = ["navigation", "filter", "orientation", "error state", "kalman filter"]
 license = "MIT OR Apache-2.0"
-categories = ["embedded", "no-std"]
+categories = ["embedded", "no-std", "mathematics", "science::robotics"]
 edition = "2018"
 readme = "README.md"
+homepage = "https://github.com/nordmoen/eskf-rs"
+repository = "https://github.com/nordmoen/eskf-rs"
 
 [features]
 default = ["std", "full-reset"]
