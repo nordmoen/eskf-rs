@@ -245,7 +245,7 @@ impl ESKF {
         // Update internal state kinematics
         self.position += self.velocity * delta_t + 0.5 * rot_acc_grav * delta_t.powi(2);
         self.velocity += rot_acc_grav * delta_t;
-        self.orientation = self.orientation * norm_rot;
+        self.orientation *= norm_rot;
 
         // Propagate uncertainty, since we have not observed any new information about the state of
         // the filter we need to update our estimate of the uncertainty of the filer
