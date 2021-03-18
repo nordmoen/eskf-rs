@@ -5,7 +5,7 @@ authors = ["Jørgen Nordmoen <jorgen@nordmoen.net>"]
 edition = "2018"
 
 [features]
-default = ["full-reset"]
+default = ["std", "full-reset"]
 
 # Perform a full filter reset during measurement update
 full-reset = []
@@ -13,6 +13,8 @@ full-reset = []
 cov-symmetric = []
 # Stable, symmetric and positive covariance update, computationally expensive
 cov-joseph = []
+# Use Rust 'std', disable to enable 'no_std'
+std = ["nalgebra/std"]
 
 [dependencies]
 nalgebra = "0.25"

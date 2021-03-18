@@ -6,8 +6,8 @@
 //!
 //! The navigation filter is used to track `position`, `velocity` and `orientation` of an object
 //! which is sensing its state through an [Inertial Measurement Unit
-//! (IMU)](https://en.wikipedia.org/wiki/Inertial_measurement_unit) and some other means such as
-//! GPS, LIDAR or visual odometry.
+//! (IMU)](https://en.wikipedia.org/wiki/Inertial_measurement_unit) and some means of observing the
+//! true state of the filter such as GPS, LIDAR or visual odometry.
 //!
 //! ## Usage
 //! ```
@@ -20,13 +20,16 @@
 //! // Read measurements from IMU
 //! let imu_acceleration = Vector3::new(0.0, 0.0, -9.81);
 //! let imu_rotation = Vector3::zeros();
-//! // Tell the filter about what we just measured
+//! // Tell the filter what we just measured
 //! filter.predict(imu_acceleration, imu_rotation, Duration::from_millis(1000));
 //! // Check the new state of the filter
 //! // filter.position or filter.velocity...
 //! // ...
 //! // After some time we get an observation of the actual state
-//! filter.observe_position(Point3::new(0.0, 0.0, 0.0), eskf::ESKF::symmetric_variance(0.1));
+//! filter.observe_position(
+//!     Point3::new(0.0, 0.0, 0.0),
+//!     eskf::ESKF::variance_from_element(0.1))
+//!         .expect("Filter update failed");
 //! // Since we have supplied an observation of the actual state of the filter the states have now
 //! // been updated. The uncertainty of the filter is also updated to reflect this new information.
 //! ```
@@ -35,9 +38,10 @@
 #![deny(unsafe_code)]
 #![deny(warnings)]
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
-use std::ops::{AddAssign, SubAssign};
-use std::time::Duration;
+use core::ops::{AddAssign, SubAssign};
 
 /// Potential errors raised during operations
 #[derive(Copy, Clone, Debug)]
@@ -53,7 +57,13 @@ pub enum Error {
 }
 
 /// Helper definition to make it easier to work with errors
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
+/// Time delta as a duration, used when `std` is available
+#[cfg(feature = "std")]
+pub type Delta = std::time::Duration;
+/// Time delta in seconds, used in `no_std` environments
+#[cfg(not(feature = "std"))]
+pub type Delta = f32;
 
 /// Builder for [`ESKF`]
 #[derive(Copy, Clone, Default, Debug)]
@@ -165,9 +175,9 @@ impl Builder {
 
 /// Error State Kalman Filter
 ///
-/// The filter works by calling [`predict`](ESKF::predict) and one or more of the `observe_`
-/// methods when data is available. It is expected that several calls to [`predict`](ESKF::predict)
-/// will be in between calls to `observe_`.
+/// The filter works by calling [`predict`](ESKF::predict) and one or more of the
+/// [`observe_`](ESKF::observe_position) methods when data is available. It is expected that
+/// several calls to [`predict`](ESKF::predict) will be in between calls to `observe_`.
 ///
 /// The [`predict`](ESKF::predict) step updates the internal state of the filter based on measured
 /// acceleration and rotation coming from an IMU. This step updates the states in the filter based
@@ -243,8 +253,12 @@ impl ESKF {
     }
 
     /// Updated the filter, predicting the new state, based on measured acceleration and rotation
-    pub fn predict(&mut self, acceleration: Vector3<f32>, rotation: Vector3<f32>, delta: Duration) {
+    pub fn predict(&mut self, acceleration: Vector3<f32>, rotation: Vector3<f32>, delta: Delta) {
+        #[cfg(feature = "std")]
         let delta_t = delta.as_secs_f32();
+        #[cfg(not(feature = "std"))]
+        let delta_t = delta;
+
         let rot_acc_grav = self
             .orientation
             .transform_vector(&(acceleration - self.accel_bias))
