@@ -31,6 +31,8 @@
 //! // been updated. The uncertainty of the filter is also updated to reflect this new information.
 //! ```
 
+#![deny(missing_docs)]
+#![deny(unsafe_code)]
 #![deny(warnings)]
 
 use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
