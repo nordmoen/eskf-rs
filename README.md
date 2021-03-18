@@ -1,5 +1,7 @@
 # Error State Kalman Filter (`ESKF`)
 [![Continuous integration](https://github.com/nordmoen/eskf-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/nordmoen/eskf-rs/actions/workflows/ci.yml)
+[![Crates.io version](https://img.shields.io/crates/v/eskf.svg)](https://crates.io/crates/eskf)
+[![Docs.rs version](https://docs.rs/eskf/badge.svg)](https://docs.rs/eskf)
 
 This crate implements a navigation filter based on an [Error State Kalman
 Filter](./docs/Error_State_Kalman_Filter.pdf).
