@@ -40,7 +40,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::ops::{AddAssign, SubAssign};
-use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
+use nalgebra::{
+    Matrix2, Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3,
+};
 
 /// Potential errors raised during operations
 #[derive(Copy, Clone, Debug)]
@@ -372,6 +374,11 @@ impl ESKF {
     }
 
     /// Update the filter with an observation of the velocity
+    ///
+    /// # Note
+    /// If the observation comes from a sensor relative to the filter, e.g. an optical flow sensor
+    /// that turns with the UAV, the sensor values **needs** to be rotated into the same frame as
+    /// the filter, e.g. `filter.orientation.transform_vector(&relative_measurement)`.
     pub fn observe_velocity(
         &mut self,
         measurement: Vector3<f32>,
@@ -383,6 +390,32 @@ impl ESKF {
             .fill_with_identity();
         let diff = measurement - self.velocity;
         self.update3(jacobian, diff, variance)
+    }
+
+    /// Update the filter with an observation of the velocity in only the `[X, Y]` axis
+    ///
+    /// # Note
+    /// If the observation comes from a sensor relative to the filter, e.g. an optical flow sensor
+    /// that turns with the UAV, the sensor values **needs** to be rotated into the same frame as
+    /// the filter, e.g. `filter.orientation.transform_vector(&relative_measurement)`.
+    pub fn observe_velocity2d(
+        &mut self,
+        measurement: Vector2<f32>,
+        variance: Matrix2<f32>,
+    ) -> Result<()> {
+        let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U2, U2>(0, 3)
+            .fill_with_identity();
+        let diff = Vector3::new(
+            measurement.x - self.velocity.x,
+            measurement.y - self.velocity.y,
+            0.0,
+        );
+        let mut var = Matrix3::zeros();
+        var.fixed_slice_mut::<U2, U2>(0, 0).copy_from(&variance);
+
+        self.update3(jacobian, diff, var)
     }
 
     /// Update the filter with an observation of the orientation
