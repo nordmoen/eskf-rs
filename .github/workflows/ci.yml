@@ -16,7 +16,6 @@ jobs:
         features: [--all-features, --no-default-features]
         include:
           - {toolchain: nightly, os: ubuntu-latest}
-
     steps:
       - uses: actions/checkout@v2
 
@@ -39,6 +38,7 @@ jobs:
 
   clippy_fmt:
     runs-on: ubuntu-latest
+    steps:
       - uses: actions/checkout@v2
 
       - uses: actions-rs/toolchain@v1
