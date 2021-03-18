@@ -37,11 +37,10 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 #![deny(warnings)]
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
 use core::ops::{AddAssign, SubAssign};
+use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
 
 /// Potential errors raised during operations
 #[derive(Copy, Clone, Debug)]
