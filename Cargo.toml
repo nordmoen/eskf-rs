@@ -10,6 +10,7 @@ edition = "2018"
 readme = "README.md"
 homepage = "https://github.com/nordmoen/eskf-rs"
 repository = "https://github.com/nordmoen/eskf-rs"
+documentation = "https://docs.rs/eskf"
 exclude = ["docs/*"]
 
 [features]
