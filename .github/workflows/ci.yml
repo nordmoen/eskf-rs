@@ -8,6 +8,7 @@ on:
 
 jobs:
   ci:
+    needs: clippy_fmt
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -15,7 +16,7 @@ jobs:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         features: [--all-features, --no-default-features]
         include:
-          - {toolchain: nightly, os: ubuntu-latest}
+          - {rust: nightly, os: ubuntu-latest}
     steps:
       - uses: actions/checkout@v2
 
