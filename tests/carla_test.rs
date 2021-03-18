@@ -54,7 +54,8 @@ fn dataset1() {
         File::open("tests/carla_dataset1.json").expect("Could not open 'tests/carla_dataset1.json");
     let reader = BufReader::new(file);
     let dataset: Dataset = serde_json::from_reader(reader).expect("Could not parse JSON");
-    let position_variance = eskf::ESKF::symmetric_variance(dataset.variance.gnss_position.sqrt());
+    let position_variance =
+        eskf::ESKF::variance_from_element(dataset.variance.gnss_position.sqrt());
     // Create filter based on dataset
     let mut filter = eskf::Builder::new()
         .acceleration_variance(dataset.variance.imu_acceleration)

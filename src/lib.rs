@@ -207,32 +207,39 @@ impl ESKF {
     ///
     /// This helper method can be used when the sensor being modelled has a symmetric variance
     /// around its three axis. Or if only an estimate of the variance is known.
-    pub fn symmetric_variance(var: f32) -> Matrix3<f32> {
+    pub fn variance_from_element(var: f32) -> Matrix3<f32> {
         Matrix3::from_diagonal_element(var)
+    }
+
+    /// Create a symmetric variance matrix based on the diagonal vector
+    ///
+    /// This helper method can be used when the sensor being modelled has a independent variance
+    /// around its three axis.
+    pub fn variance_from_diagonal(var: Vector3<f32>) -> Matrix3<f32> {
+        Matrix3::from_diagonal(&var)
+    }
+
+    /// Internal helper method to extract 3 dimensional uncertainty from the covariance state
+    fn uncertainty3(&self, start: usize) -> Vector3<f32> {
+        self.covariance
+            .diagonal()
+            .fixed_slice::<U3, U1>(start, 0)
+            .map(|var| var.sqrt())
     }
 
     /// Get the uncertainty of the position estimate
     pub fn position_uncertainty(&self) -> Vector3<f32> {
-        self.covariance
-            .diagonal()
-            .fixed_slice::<U3, U1>(0, 0)
-            .clone_owned()
+        self.uncertainty3(0)
     }
 
     /// Get the uncertainty of the velocity estimate
     pub fn velocity_uncertainty(&self) -> Vector3<f32> {
-        self.covariance
-            .diagonal()
-            .fixed_slice::<U3, U1>(3, 0)
-            .clone_owned()
+        self.uncertainty3(3)
     }
 
     /// Get the uncertainty of the orientation estimate
     pub fn orientation_uncertainty(&self) -> Vector3<f32> {
-        self.covariance
-            .diagonal()
-            .fixed_slice::<U3, U1>(3, 0)
-            .clone_owned()
+        self.uncertainty3(6)
     }
 
     /// Updated the filter, predicting the new state, based on measured acceleration and rotation
