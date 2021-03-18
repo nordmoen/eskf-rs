@@ -14,9 +14,9 @@ jobs:
       matrix:
         rust: [stable]
         os: [ubuntu-latest, macOS-latest, windows-latest]
-        features: [--all-features, --no-default-features]
+        features: [--features default, --no-default-features]
         include:
-          - {rust: nightly, os: ubuntu-latest, features: --all-features}
+          - {rust: nightly, os: ubuntu-latest, features: --features default}
           - {rust: nightly, os: ubuntu-latest, features: --no-default-features}
     steps:
       - uses: actions/checkout@v2
@@ -64,4 +64,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: -- -D warnings --no-deps
