@@ -19,6 +19,7 @@ nalgebra = "0.25"
 
 [dev-dependencies]
 approx = "0.4.0"
+nalgebra = {version = "0.25", features = ["serde-serialize"] }
 serde = {version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-nalgebra = {version = "0.25", features = ["serde-serialize"] }
+plotly = "0.6.0"
