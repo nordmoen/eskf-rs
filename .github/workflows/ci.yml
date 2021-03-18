@@ -16,23 +16,27 @@ jobs:
         os: [ubuntu-latest, macOS-latest, windows-latest]
         features: [--all-features, --no-default-features]
         include:
-          - {rust: nightly, os: ubuntu-latest}
+          - {rust: nightly, os: ubuntu-latest, features: --all-features}
+          - {rust: nightly, os: ubuntu-latest, features: --no-default-features}
     steps:
       - uses: actions/checkout@v2
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install Rust ${{ matrix.rust }}
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt, clippy
 
-      - uses: actions-rs/cargo@v1
+      - name: Build project
+        uses: actions-rs/cargo@v1
         with:
           command: build
           args: ${{ matrix.features }}
 
-      - uses: actions-rs/cargo@v1
+      - name: Run tests
+        uses: actions-rs/cargo@v1
         with:
           command: test
           args: --all -- --skip dataset1
@@ -42,19 +46,22 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
           override: true
           components: rustfmt, clippy
 
-      - uses: actions-rs/cargo@v1
+      - name: Check formatting
+        uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
 
-      - uses: actions-rs/cargo@v1
+      - name: Run Clippy for linting
+        uses: actions-rs/cargo@v1
         with:
           command: clippy
           args: -- -D warnings
