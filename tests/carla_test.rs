@@ -77,7 +77,9 @@ fn dataset1() {
 
         filter.predict(m.imu.acceleration, m.imu.rotation, delta);
         if let Some(position) = m.gnss.position {
-            filter.observe_position(position, position_variance);
+            filter
+                .observe_position(position, position_variance)
+                .expect("Position observation failed");
         }
 
         let gt_orient = UnitQuaternion::from_euler_angles(
