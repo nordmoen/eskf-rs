@@ -30,9 +30,28 @@
 //! // Since we have supplied an observation of the actual state of the filter the states have now
 //! // been updated. The uncertainty of the filter is also updated to reflect this new information.
 //! ```
+
+#![deny(warnings)]
+
 use nalgebra::{Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector3, U1, U18, U3};
 use std::ops::{AddAssign, SubAssign};
 use std::time::Duration;
+
+/// Potential errors raised during operations
+#[derive(Copy, Clone, Debug)]
+pub enum Error {
+    /// It is not always [the case that a matrix is
+    /// invertible](https://en.wikipedia.org/wiki/Invertible_matrix) which can lead to errors. It
+    /// is difficult to handle this both for the library and for the users. In the case of the
+    /// [`ESKF`], if this happens, it may be caused by an irregular shaped variance matrix for the
+    /// update step. In such cases, inspect the variance matrix. If this happens irregularly it can
+    /// be a sign that the uncertainty update is not stable, if possible try one of `cov-symmetric`
+    /// or `cov-joseph` features for a more stable update.
+    InversionError,
+}
+
+/// Helper definition to make it easier to work with errors
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Builder for [`ESKF`]
 #[derive(Copy, Clone, Default, Debug)]
@@ -145,15 +164,16 @@ impl Builder {
 /// Error State Kalman Filter
 ///
 /// The filter works by calling [`predict`](ESKF::predict) and one or more of the `observe_`
-/// methods when data is available.
+/// methods when data is available. It is expected that several calls to [`predict`](ESKF::predict)
+/// will be in between calls to `observe_`.
 ///
 /// The [`predict`](ESKF::predict) step updates the internal state of the filter based on measured
 /// acceleration and rotation coming from an IMU. This step updates the states in the filter based
-/// on kinematic motion while increasing the uncertainty of the filter. When one of the `observe_`
-/// methods are called, the filter updates the internal state based on this observation, which
-/// exposes the error state to the filter, which we can then use to correct the internal state. The
-/// uncertainty of the filter is also updated to reflect the variance of the observation and the
-/// updated state.
+/// on kinematic equations while increasing the uncertainty of the filter. When one of the
+/// `observe_` methods are called, the filter updates the internal state based on this observation,
+/// which exposes the error state to the filter, which we can then use to correct the internal
+/// state. The uncertainty of the filter is also updated to reflect the variance of the observation
+/// and the updated state.
 #[derive(Copy, Clone, Debug)]
 pub struct ESKF {
     /// Estimated position in filter
@@ -169,7 +189,7 @@ pub struct ESKF {
     /// Estimated gravity vector
     pub gravity: Vector3<f32>,
     /// Covariance of filter state
-    pub covariance: MatrixN<f32, U18>,
+    covariance: MatrixN<f32, U18>,
     /// Acceleration variance
     var_acc: Vector3<f32>,
     /// Rotation variance
@@ -182,6 +202,9 @@ pub struct ESKF {
 
 impl ESKF {
     /// Create a symmetric variance matrix based on a single variance element
+    ///
+    /// This helper method can be used when the sensor being modelled has a symmetric variance
+    /// around its three axis. Or if only an estimate of the variance is known.
     pub fn symmetric_variance(var: f32) -> Matrix3<f32> {
         Matrix3::from_diagonal_element(var)
     }
@@ -270,13 +293,13 @@ impl ESKF {
         jacobian: MatrixMN<f32, U3, U18>,
         difference: Vector3<f32>,
         variance: Matrix3<f32>,
-    ) {
+    ) -> Result<()> {
         // Correct filter based on Kalman gain
         let kalman_gain = self.covariance
             * jacobian.transpose()
             * (jacobian * self.covariance * jacobian.transpose() + variance)
                 .try_inverse()
-                .expect("Could not invert Kalman gain");
+                .ok_or(Error::InversionError)?;
         let error_state = kalman_gain * difference;
         // Update the covariance based on the observed filter state
         if cfg!(feature = "cov-symmetric") {
@@ -309,26 +332,35 @@ impl ESKF {
                 .sub_assign(0.5 * skew(&error_state.fixed_slice::<U3, U1>(6, 0).clone_owned()));
             self.covariance = g * self.covariance * g.transpose();
         }
+        Ok(())
     }
 
     /// Update the filter with an observation of the position
-    pub fn observe_position(&mut self, measurement: Point3<f32>, variance: Matrix3<f32>) {
+    pub fn observe_position(
+        &mut self,
+        measurement: Point3<f32>,
+        variance: Matrix3<f32>,
+    ) -> Result<()> {
         let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
         jacobian
             .fixed_slice_mut::<U3, U3>(0, 0)
             .fill_with_identity();
         let diff = measurement - self.position;
-        self.update3(jacobian, diff, variance);
+        self.update3(jacobian, diff, variance)
     }
 
     /// Update the filter with an observation of the velocity
-    pub fn observe_velocity(&mut self, measurement: Vector3<f32>, variance: Matrix3<f32>) {
+    pub fn observe_velocity(
+        &mut self,
+        measurement: Vector3<f32>,
+        variance: Matrix3<f32>,
+    ) -> Result<()> {
         let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
         jacobian
             .fixed_slice_mut::<U3, U3>(0, 3)
             .fill_with_identity();
         let diff = measurement - self.velocity;
-        self.update3(jacobian, diff, variance);
+        self.update3(jacobian, diff, variance)
     }
 
     /// Update the filter with an observation of the orientation
@@ -336,13 +368,13 @@ impl ESKF {
         &mut self,
         measurement: UnitQuaternion<f32>,
         variance: Matrix3<f32>,
-    ) {
+    ) -> Result<()> {
         let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
         jacobian
             .fixed_slice_mut::<U3, U3>(0, 6)
             .fill_with_identity();
         let diff = measurement * self.orientation;
-        self.update3(jacobian, diff.scaled_axis(), variance);
+        self.update3(jacobian, diff.scaled_axis(), variance)
     }
 }
 
