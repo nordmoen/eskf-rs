@@ -27,7 +27,6 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
-          components: rustfmt, clippy
 
       - name: Build project
         uses: actions-rs/cargo@v1
@@ -37,6 +36,7 @@ jobs:
 
       - name: Run tests
         uses: actions-rs/cargo@v1
+        if: ${{ matrix.features == '--features default' }}
         with:
           command: test
           args: --all -- --skip dataset1
