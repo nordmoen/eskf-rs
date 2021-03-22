@@ -1,6 +1,6 @@
 [package]
 name = "eskf"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Jørgen Nordmoen <jorgen@nordmoen.net>"]
 description = "Navigation filter based on an Error State Kalman Filter (ESKF)"
 keywords = ["navigation", "filter", "orientation", "kalman"]
