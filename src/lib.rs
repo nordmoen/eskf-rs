@@ -390,8 +390,10 @@ impl ESKF {
             .fill_with_identity();
 
         let mut diff = VectorN::<f32, U5>::zeros();
-        diff.fixed_slice_mut::<U3, U1>(0, 0).copy_from(&(position - self.position));
-        diff.fixed_slice_mut::<U2, U1>(3, 0).copy_from(&(velocity - self.velocity.xy()));
+        diff.fixed_slice_mut::<U3, U1>(0, 0)
+            .copy_from(&(position - self.position));
+        diff.fixed_slice_mut::<U2, U1>(3, 0)
+            .copy_from(&(velocity - self.velocity.xy()));
 
         let mut var = MatrixN::<f32, U5>::zeros();
         var.fixed_slice_mut::<U3, U3>(0, 0).copy_from(&position_var);
