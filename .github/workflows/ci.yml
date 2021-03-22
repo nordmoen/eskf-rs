@@ -39,7 +39,7 @@ jobs:
         if: ${{ matrix.features == '--features default' }}
         with:
           command: test
-          args: --all -- --skip dataset1
+          args: --all
 
   clippy_fmt:
     runs-on: ubuntu-latest

@@ -72,7 +72,9 @@ fn dataset1() {
     );
     // Iterate measurements and update filter
     let mut last_time = m.time;
-    for m in dataset.data.iter().skip(1) {
+    // There are > 8000 data points in dataset 1, unfortunately the data starts to drift after a
+    // while, but this limited number should still be able to test the filter
+    for m in dataset.data.iter().skip(1).take(4000) {
         let delta = std::time::Duration::from_secs_f32(m.time - last_time);
         last_time = m.time;
 
