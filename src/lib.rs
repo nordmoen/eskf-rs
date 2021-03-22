@@ -36,12 +36,12 @@
 
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
-#![deny(warnings)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::ops::{AddAssign, SubAssign};
 use nalgebra::{
-    Matrix2, Matrix3, MatrixMN, MatrixN, Point3, UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3,
+    base::allocator::Allocator, DefaultAllocator, Dim, Matrix2, Matrix3, MatrixMN, MatrixN, Point3,
+    UnitQuaternion, Vector2, Vector3, VectorN, U1, U18, U2, U3, U5,
 };
 
 /// Potential errors raised during operations
@@ -253,7 +253,8 @@ impl ESKF {
         self.uncertainty3(6)
     }
 
-    /// Updated the filter, predicting the new state, based on measured acceleration and rotation
+    /// Update the filter, predicting the new state, based on measured acceleration and rotation
+    /// from an `IMU`
     pub fn predict(&mut self, acceleration: Vector3<f32>, rotation: Vector3<f32>, delta: Delta) {
         #[cfg(feature = "std")]
         let delta_t = delta.as_secs_f32();
@@ -311,32 +312,44 @@ impl ESKF {
         self.covariance.set_diagonal(&diagonal);
     }
 
-    /// Internal update method to update the filter from a single measurement
-    fn update3(
+    /// Update the filter with a generic observation
+    ///
+    /// # Arguments
+    /// - `jacobian` is the measurement Jacobian matrix
+    /// - `difference` is the difference between the measured sensor and the filter's internal
+    /// state
+    /// - `variance` is the uncertainty of the observation
+    pub fn update<R: Dim>(
         &mut self,
-        jacobian: MatrixMN<f32, U3, U18>,
-        difference: Vector3<f32>,
-        variance: Matrix3<f32>,
-    ) -> Result<()> {
+        jacobian: MatrixMN<f32, R, U18>,
+        difference: VectorN<f32, R>,
+        variance: MatrixN<f32, R>,
+    ) -> Result<()>
+    where
+        DefaultAllocator: Allocator<f32, R>
+            + Allocator<f32, R, R>
+            + Allocator<f32, R, U18>
+            + Allocator<f32, U18, R>,
+    {
         // Correct filter based on Kalman gain
         let kalman_gain = self.covariance
-            * jacobian.transpose()
-            * (jacobian * self.covariance * jacobian.transpose() + variance)
+            * &jacobian.transpose()
+            * (&jacobian * self.covariance * &jacobian.transpose() + &variance)
                 .try_inverse()
                 .ok_or(Error::InversionError)?;
-        let error_state = kalman_gain * difference;
+        let error_state = &kalman_gain * difference;
         // Update the covariance based on the observed filter state
         if cfg!(feature = "cov-symmetric") {
-            self.covariance -= kalman_gain
-                * (jacobian * self.covariance * jacobian.transpose() + variance)
-                * kalman_gain.transpose();
+            self.covariance -= &kalman_gain
+                * (&jacobian * self.covariance * &jacobian.transpose() + &variance)
+                * &kalman_gain.transpose();
         } else if cfg!(feature = "cov-joseph") {
-            let step1 = MatrixN::<f32, U18>::identity() - kalman_gain * jacobian;
-            let step2 = kalman_gain * variance * kalman_gain.transpose();
+            let step1 = MatrixN::<f32, U18>::identity() - &kalman_gain * &jacobian;
+            let step2 = &kalman_gain * &variance * &kalman_gain.transpose();
             self.covariance = step1 * self.covariance * step1.transpose() + step2;
         } else {
             self.covariance =
-                (MatrixN::<f32, U18>::identity() - kalman_gain * jacobian) * self.covariance;
+                (MatrixN::<f32, U18>::identity() - &kalman_gain * &jacobian) * self.covariance;
         }
         // Inject error state into nominal
         self.position += error_state.fixed_slice::<U3, U1>(0, 0);
@@ -359,6 +372,34 @@ impl ESKF {
         Ok(())
     }
 
+    /// Observe the position and velocity in the X and Y axis
+    ///
+    /// Most GPS units are capable of observing both position and velocity, by combining these two
+    /// measurements into one update we should be able to reduce the computational complexity. Also
+    /// note that GPS velocity tends to be more precise than position.
+    pub fn observe_position_velocity2d(
+        &mut self,
+        position: Point3<f32>,
+        position_var: Matrix3<f32>,
+        velocity: Vector2<f32>,
+        velocity_var: Matrix2<f32>,
+    ) -> Result<()> {
+        let mut jacobian = MatrixMN::<f32, U5, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U5, U5>(0, 0)
+            .fill_with_identity();
+
+        let mut diff = VectorN::<f32, U5>::zeros();
+        diff.fixed_slice_mut::<U3, U1>(0, 0).copy_from(&(position - self.position));
+        diff.fixed_slice_mut::<U2, U1>(3, 0).copy_from(&(velocity - self.velocity.xy()));
+
+        let mut var = MatrixN::<f32, U5>::zeros();
+        var.fixed_slice_mut::<U3, U3>(0, 0).copy_from(&position_var);
+        var.fixed_slice_mut::<U2, U2>(3, 3).copy_from(&velocity_var);
+
+        self.update(jacobian, diff, var)
+    }
+
     /// Update the filter with an observation of the position
     pub fn observe_position(
         &mut self,
@@ -370,7 +411,18 @@ impl ESKF {
             .fixed_slice_mut::<U3, U3>(0, 0)
             .fill_with_identity();
         let diff = measurement - self.position;
-        self.update3(jacobian, diff, variance)
+        self.update(jacobian, diff, variance)
+    }
+
+    /// Update the filter with an observation of the height alone
+    pub fn observe_height(&mut self, measured: f32, variance: f32) -> Result<()> {
+        let mut jacobian = MatrixMN::<f32, U1, U18>::zeros();
+        jacobian
+            .fixed_slice_mut::<U1, U1>(0, 2)
+            .fill_with_identity();
+        let diff = VectorN::<f32, U1>::new(measured - self.position.z);
+        let var = MatrixMN::<f32, U1, U1>::new(variance);
+        self.update(jacobian, diff, var)
     }
 
     /// Update the filter with an observation of the velocity
@@ -389,7 +441,7 @@ impl ESKF {
             .fixed_slice_mut::<U3, U3>(0, 3)
             .fill_with_identity();
         let diff = measurement - self.velocity;
-        self.update3(jacobian, diff, variance)
+        self.update(jacobian, diff, variance)
     }
 
     /// Update the filter with an observation of the velocity in only the `[X, Y]` axis
@@ -403,19 +455,15 @@ impl ESKF {
         measurement: Vector2<f32>,
         variance: Matrix2<f32>,
     ) -> Result<()> {
-        let mut jacobian = MatrixMN::<f32, U3, U18>::zeros();
+        let mut jacobian = MatrixMN::<f32, U2, U18>::zeros();
         jacobian
             .fixed_slice_mut::<U2, U2>(0, 3)
             .fill_with_identity();
-        let diff = Vector3::new(
+        let diff = Vector2::new(
             measurement.x - self.velocity.x,
             measurement.y - self.velocity.y,
-            0.0,
         );
-        let mut var = Matrix3::zeros();
-        var.fixed_slice_mut::<U2, U2>(0, 0).copy_from(&variance);
-
-        self.update3(jacobian, diff, var)
+        self.update(jacobian, diff, variance)
     }
 
     /// Update the filter with an observation of the orientation
@@ -429,7 +477,7 @@ impl ESKF {
             .fixed_slice_mut::<U3, U3>(0, 6)
             .fill_with_identity();
         let diff = measurement * self.orientation;
-        self.update3(jacobian, diff.scaled_axis(), variance)
+        self.update(jacobian, diff.scaled_axis(), variance)
     }
 }
 
