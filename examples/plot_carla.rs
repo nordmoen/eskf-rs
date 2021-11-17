@@ -1,11 +1,9 @@
 //! Example which reads data from the CARLA dataset and plots filter state
-use eskf;
 use nalgebra::{Point3, Vector3};
 use plotly::common::{ErrorData, ErrorType};
 use plotly::layout::{GridPattern, Layout, LayoutGrid};
 use plotly::{Plot, Scatter};
 use serde::Deserialize;
-use serde_json;
 use std::fs::File;
 use std::io::BufReader;
 
