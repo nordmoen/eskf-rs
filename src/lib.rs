@@ -39,9 +39,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::ops::{AddAssign, SubAssign};
+
 use nalgebra::{
     base::allocator::Allocator, DefaultAllocator, Dim, Matrix2, Matrix3, OMatrix, OVector, Point3,
-    UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3, U5, U6,
+    UnitQuaternion, Vector2, Vector3, U1, U15, U2, U3, U5, U6,
 };
 #[cfg(feature = "no_std")]
 use num_traits::float::Float;
@@ -172,8 +173,7 @@ impl Builder {
             orientation: UnitQuaternion::identity(),
             accel_bias: Vector3::zeros(),
             rot_bias: Vector3::zeros(),
-            gravity: Vector3::new(0f32, 0f32, 9.81),
-            covariance: OMatrix::<f32, U18, U18>::identity() * self.process_covariance,
+            covariance: OMatrix::<f32, U15, U15>::identity() * self.process_covariance,
             var_acc: self.var_acc,
             var_rot: self.var_rot,
             var_acc_bias: self.var_acc_bias,
@@ -207,10 +207,8 @@ pub struct ESKF {
     pub accel_bias: Vector3<f32>,
     /// Estimated rotation bias
     pub rot_bias: Vector3<f32>,
-    /// Estimated gravity vector
-    pub gravity: Vector3<f32>,
     /// Covariance of filter state
-    covariance: OMatrix<f32, U18, U18>,
+    covariance: OMatrix<f32, U15, U15>,
     /// Acceleration variance
     var_acc: Vector3<f32>,
     /// Rotation variance
@@ -272,7 +270,7 @@ impl ESKF {
         let rot_acc_grav = self
             .orientation
             .transform_vector(&(acceleration - self.accel_bias))
-            + self.gravity;
+            + GRAVITY;
         let norm_rot = UnitQuaternion::from_scaled_axis((rotation - self.rot_bias) * delta_t);
         let orient_mat = self.orientation.to_rotation_matrix().into_inner();
         // Update internal state kinematics
@@ -283,7 +281,7 @@ impl ESKF {
         // Propagate uncertainty, since we have not observed any new information about the state of
         // the filter we need to update our estimate of the uncertainty of the filer
         let ident_delta = Matrix3::<f32>::identity() * delta_t;
-        let mut error_jacobian = OMatrix::<f32, U18, U18>::identity();
+        let mut error_jacobian = OMatrix::<f32, U15, U15>::identity();
         error_jacobian
             .fixed_view_mut::<3, 3>(0, 3)
             .copy_from(&ident_delta);
@@ -293,9 +291,6 @@ impl ESKF {
         error_jacobian
             .fixed_view_mut::<3, 3>(3, 9)
             .copy_from(&(-orient_mat * delta_t));
-        error_jacobian
-            .fixed_view_mut::<3, 3>(3, 15)
-            .copy_from(&ident_delta);
         error_jacobian
             .fixed_view_mut::<3, 3>(6, 6)
             .copy_from(&norm_rot.to_rotation_matrix().into_inner().transpose());
@@ -329,12 +324,12 @@ impl ESKF {
     /// - `variance` is the uncertainty of the observation
     pub fn update<R: Dim>(
         &mut self,
-        jacobian: OMatrix<f32, R, U18>,
+        jacobian: OMatrix<f32, R, U15>,
         difference: OVector<f32, R>,
         variance: OMatrix<f32, R, R>,
     ) -> Result<()>
     where
-        DefaultAllocator: Allocator<R> + Allocator<R, R> + Allocator<R, U18> + Allocator<U18, R>,
+        DefaultAllocator: Allocator<R> + Allocator<R, R> + Allocator<R, U15> + Allocator<U15, R>,
     {
         // Correct filter based on Kalman gain
         let kalman_gain = self.covariance
@@ -349,12 +344,12 @@ impl ESKF {
                 * (&jacobian * self.covariance * &jacobian.transpose() + &variance)
                 * &kalman_gain.transpose();
         } else if cfg!(feature = "cov-joseph") {
-            let step1 = OMatrix::<f32, U18, U18>::identity() - &kalman_gain * &jacobian;
+            let step1 = OMatrix::<f32, U15, U15>::identity() - &kalman_gain * &jacobian;
             let step2 = &kalman_gain * &variance * &kalman_gain.transpose();
             self.covariance = step1 * self.covariance * step1.transpose() + step2;
         } else {
             self.covariance =
-                (OMatrix::<f32, U18, U18>::identity() - &kalman_gain * &jacobian) * self.covariance;
+                (OMatrix::<f32, U15, U15>::identity() - &kalman_gain * &jacobian) * self.covariance;
         }
         // Inject error state into nominal
         self.position += error_state.fixed_view::<3, 1>(0, 0);
@@ -362,13 +357,12 @@ impl ESKF {
         self.orientation *= UnitQuaternion::from_scaled_axis(error_state.fixed_view::<3, 1>(6, 0));
         self.accel_bias += error_state.fixed_view::<3, 1>(9, 0);
         self.rot_bias += error_state.fixed_view::<3, 1>(12, 0);
-        self.gravity += error_state.fixed_view::<3, 1>(15, 0);
         // Perform full ESKF reset
         //
         // Since the orientation error is usually relatively small this step can be skipped, but
         // the full formulation can lead to better stability of the filter
         if cfg!(feature = "full-reset") {
-            let mut g = OMatrix::<f32, U18, U18>::identity();
+            let mut g = OMatrix::<f32, U15, U15>::identity();
             g.fixed_view_mut::<3, 3>(6, 6)
                 .sub_assign(0.5 * skew(&error_state.fixed_view::<3, 1>(6, 0).clone_owned()));
             self.covariance = g * self.covariance * g.transpose();
@@ -388,7 +382,7 @@ impl ESKF {
         velocity: Vector2<f32>,
         velocity_var: Matrix2<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U5, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U5, U15>::zeros();
         jacobian.fixed_view_mut::<5, 5>(0, 0).fill_with_identity();
 
         let mut diff = OVector::<f32, U5>::zeros();
@@ -416,7 +410,7 @@ impl ESKF {
         velocity: Vector3<f32>,
         velocity_var: Matrix3<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U6, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U6, U15>::zeros();
         jacobian.fixed_view_mut::<6, 6>(0, 0).fill_with_identity();
 
         let mut diff = OVector::<f32, U6>::zeros();
@@ -438,7 +432,7 @@ impl ESKF {
         measurement: Point3<f32>,
         variance: Matrix3<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U3, U15>::zeros();
         jacobian.fixed_view_mut::<3, 3>(0, 0).fill_with_identity();
         let diff = measurement - self.position;
         self.update(jacobian, diff, variance)
@@ -446,7 +440,7 @@ impl ESKF {
 
     /// Update the filter with an observation of the height alone
     pub fn observe_height(&mut self, measured: f32, variance: f32) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U1, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U1, U15>::zeros();
         jacobian.fixed_view_mut::<1, 1>(0, 2).fill_with_identity();
         let diff = OVector::<f32, U1>::new(measured - self.position.z);
         let var = OMatrix::<f32, U1, U1>::new(variance);
@@ -464,7 +458,7 @@ impl ESKF {
         measurement: Vector3<f32>,
         variance: Matrix3<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U3, U15>::zeros();
         jacobian.fixed_view_mut::<3, 3>(0, 3).fill_with_identity();
         let diff = measurement - self.velocity;
         self.update(jacobian, diff, variance)
@@ -481,7 +475,7 @@ impl ESKF {
         measurement: Vector2<f32>,
         variance: Matrix2<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U2, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U2, U15>::zeros();
         jacobian.fixed_view_mut::<2, 2>(0, 3).fill_with_identity();
         let diff = Vector2::new(
             measurement.x - self.velocity.x,
@@ -496,12 +490,14 @@ impl ESKF {
         measurement: UnitQuaternion<f32>,
         variance: Matrix3<f32>,
     ) -> Result<()> {
-        let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
+        let mut jacobian = OMatrix::<f32, U3, U15>::zeros();
         jacobian.fixed_view_mut::<3, 3>(0, 6).fill_with_identity();
         let diff = measurement * self.orientation;
         self.update(jacobian, diff.scaled_axis(), variance)
     }
 }
+
+const GRAVITY: Vector3<f32> = Vector3::new(0f32, 0f32, 9.81);
 
 /// Create the skew-symmetric matrix from a vector
 #[rustfmt::skip]
