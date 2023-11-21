@@ -46,6 +46,12 @@ use nalgebra::{
 #[cfg(feature = "no_std")]
 use num_traits::float::Float;
 
+#[cfg(any(
+    all(feature = "std", feature = "no_std"),
+    not(any(feature = "std", feature = "no_std"))
+))]
+compile_error!("Exactly one of features `std` and `no_std` must be enabled");
+
 /// Potential errors raised during operations
 #[derive(Copy, Clone, Debug)]
 pub enum Error {
