@@ -21,15 +21,20 @@ full-reset = []
 cov-symmetric = []
 # Stable, symmetric and positive covariance update, computationally expensive
 cov-joseph = []
-# Use Rust 'std', disable to enable 'no_std'
+# Use Rust 'std', disable and enable 'no_std' to use in no_std enviroment
 std = ["nalgebra/std"]
+# Enable to use in no_srd enviroment
+no_std = ["nalgebra/libm", "dep:num-traits"]
 
 [dependencies]
-nalgebra = "0.29"
+nalgebra = { version = "0.32.3", default-features = false }
+num-traits = { version = "0.2.17", optional = true, default-features = false, features = [
+    "libm",
+] }
 
 [dev-dependencies]
 approx = "0.5.0"
-nalgebra = { version = "0.29", features = ["serde-serialize", "debug"] }
+nalgebra = { version = "0.32", features = ["serde-serialize", "debug"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 plotly = "0.6.0"
