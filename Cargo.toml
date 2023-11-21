@@ -23,7 +23,7 @@ cov-symmetric = []
 cov-joseph = []
 # Use Rust 'std', disable and enable 'no_std' to use in no_std enviroment
 std = ["nalgebra/std"]
-# Enable to use in no_srd enviroment
+# Enable to use in no_std environment
 no_std = ["nalgebra/libm", "dep:num-traits"]
 
 [dependencies]
