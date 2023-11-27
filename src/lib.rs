@@ -41,7 +41,7 @@
 use core::ops::{AddAssign, SubAssign};
 use nalgebra::{
     base::allocator::Allocator, DefaultAllocator, Dim, Matrix2, Matrix3, OMatrix, OVector, Point3,
-    UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3, U5,
+    UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3, U5, U6,
 };
 #[cfg(feature = "no_std")]
 use num_traits::float::Float;
@@ -403,6 +403,34 @@ impl ESKF {
         let mut var = OMatrix::<f32, U5, U5>::zeros();
         var.fixed_view_mut::<3, 3>(0, 0).copy_from(&position_var);
         var.fixed_view_mut::<2, 2>(3, 3).copy_from(&velocity_var);
+
+        self.update(jacobian, diff, var)
+    }
+
+    /// Observe the position and velocity
+    ///
+    /// Most GPS units are capable of observing both position and velocity, by combining these two
+    /// measurements into one update we should be able to reduce the computational complexity. Also
+    /// note that GPS velocity tends to be more precise than position.
+    pub fn observe_position_velocity(
+        &mut self,
+        position: Point3<f32>,
+        position_var: Matrix3<f32>,
+        velocity: Vector3<f32>,
+        velocity_var: Matrix3<f32>,
+    ) -> Result<()> {
+        let mut jacobian = OMatrix::<f32, U6, U18>::zeros();
+        jacobian.fixed_view_mut::<6, 6>(0, 0).fill_with_identity();
+
+        let mut diff = OVector::<f32, U6>::zeros();
+        diff.fixed_view_mut::<3, 1>(0, 0)
+            .copy_from(&(position - self.position));
+        diff.fixed_view_mut::<3, 1>(3, 0)
+            .copy_from(&(velocity - self.velocity));
+
+        let mut var = OMatrix::<f32, U6, U6>::zeros();
+        var.fixed_view_mut::<3, 3>(0, 0).copy_from(&position_var);
+        var.fixed_view_mut::<3, 3>(3, 3).copy_from(&velocity_var);
 
         self.update(jacobian, diff, var)
     }
