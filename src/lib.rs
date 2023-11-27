@@ -43,6 +43,14 @@ use nalgebra::{
     base::allocator::Allocator, DefaultAllocator, Dim, Matrix2, Matrix3, OMatrix, OVector, Point3,
     UnitQuaternion, Vector2, Vector3, U1, U18, U2, U3, U5,
 };
+#[cfg(feature = "no_std")]
+use num_traits::float::Float;
+
+#[cfg(any(
+    all(feature = "std", feature = "no_std"),
+    not(any(feature = "std", feature = "no_std"))
+))]
+compile_error!("Exactly one of features `std` and `no_std` must be enabled");
 
 /// Potential errors raised during operations
 #[derive(Copy, Clone, Debug)]
@@ -234,7 +242,7 @@ impl ESKF {
     fn uncertainty3(&self, start: usize) -> Vector3<f32> {
         self.covariance
             .diagonal()
-            .fixed_slice::<3, 1>(start, 0)
+            .fixed_view_mut::<3, 1>(start, 0)
             .map(|var| var.sqrt())
     }
 
@@ -277,37 +285,37 @@ impl ESKF {
         let ident_delta = Matrix3::<f32>::identity() * delta_t;
         let mut error_jacobian = OMatrix::<f32, U18, U18>::identity();
         error_jacobian
-            .fixed_slice_mut::<3, 3>(0, 3)
+            .fixed_view_mut::<3, 3>(0, 3)
             .copy_from(&ident_delta);
         error_jacobian
-            .fixed_slice_mut::<3, 3>(3, 6)
+            .fixed_view_mut::<3, 3>(3, 6)
             .copy_from(&(-orient_mat * skew(&(acceleration - self.accel_bias)) * delta_t));
         error_jacobian
-            .fixed_slice_mut::<3, 3>(3, 9)
+            .fixed_view_mut::<3, 3>(3, 9)
             .copy_from(&(-orient_mat * delta_t));
         error_jacobian
-            .fixed_slice_mut::<3, 3>(3, 15)
+            .fixed_view_mut::<3, 3>(3, 15)
             .copy_from(&ident_delta);
         error_jacobian
-            .fixed_slice_mut::<3, 3>(6, 6)
+            .fixed_view_mut::<3, 3>(6, 6)
             .copy_from(&norm_rot.to_rotation_matrix().into_inner().transpose());
         error_jacobian
-            .fixed_slice_mut::<3, 3>(6, 12)
+            .fixed_view_mut::<3, 3>(6, 12)
             .copy_from(&-ident_delta);
         self.covariance = error_jacobian * self.covariance * error_jacobian.transpose();
         // Add noise variance
         let mut diagonal = self.covariance.diagonal();
         diagonal
-            .fixed_slice_mut::<3, 1>(3, 0)
+            .fixed_view_mut::<3, 1>(3, 0)
             .add_assign(self.var_acc * delta_t.powi(2));
         diagonal
-            .fixed_slice_mut::<3, 1>(6, 0)
+            .fixed_view_mut::<3, 1>(6, 0)
             .add_assign(self.var_rot * delta_t.powi(2));
         diagonal
-            .fixed_slice_mut::<3, 1>(9, 0)
+            .fixed_view_mut::<3, 1>(9, 0)
             .add_assign(self.var_acc_bias * delta_t);
         diagonal
-            .fixed_slice_mut::<3, 1>(12, 0)
+            .fixed_view_mut::<3, 1>(12, 0)
             .add_assign(self.var_rot_bias * delta_t);
         self.covariance.set_diagonal(&diagonal);
     }
@@ -352,20 +360,20 @@ impl ESKF {
                 (OMatrix::<f32, U18, U18>::identity() - &kalman_gain * &jacobian) * self.covariance;
         }
         // Inject error state into nominal
-        self.position += error_state.fixed_slice::<3, 1>(0, 0);
-        self.velocity += error_state.fixed_slice::<3, 1>(3, 0);
-        self.orientation *= UnitQuaternion::from_scaled_axis(error_state.fixed_slice::<3, 1>(6, 0));
-        self.accel_bias += error_state.fixed_slice::<3, 1>(9, 0);
-        self.rot_bias += error_state.fixed_slice::<3, 1>(12, 0);
-        self.gravity += error_state.fixed_slice::<3, 1>(15, 0);
+        self.position += error_state.fixed_view::<3, 1>(0, 0);
+        self.velocity += error_state.fixed_view::<3, 1>(3, 0);
+        self.orientation *= UnitQuaternion::from_scaled_axis(error_state.fixed_view::<3, 1>(6, 0));
+        self.accel_bias += error_state.fixed_view::<3, 1>(9, 0);
+        self.rot_bias += error_state.fixed_view::<3, 1>(12, 0);
+        self.gravity += error_state.fixed_view::<3, 1>(15, 0);
         // Perform full ESKF reset
         //
         // Since the orientation error is usually relatively small this step can be skipped, but
         // the full formulation can lead to better stability of the filter
         if cfg!(feature = "full-reset") {
             let mut g = OMatrix::<f32, U18, U18>::identity();
-            g.fixed_slice_mut::<3, 3>(6, 6)
-                .sub_assign(0.5 * skew(&error_state.fixed_slice::<3, 1>(6, 0).clone_owned()));
+            g.fixed_view_mut::<3, 3>(6, 6)
+                .sub_assign(0.5 * skew(&error_state.fixed_view::<3, 1>(6, 0).clone_owned()));
             self.covariance = g * self.covariance * g.transpose();
         }
         Ok(())
@@ -384,17 +392,17 @@ impl ESKF {
         velocity_var: Matrix2<f32>,
     ) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U5, U18>::zeros();
-        jacobian.fixed_slice_mut::<5, 5>(0, 0).fill_with_identity();
+        jacobian.fixed_view_mut::<5, 5>(0, 0).fill_with_identity();
 
         let mut diff = OVector::<f32, U5>::zeros();
-        diff.fixed_slice_mut::<3, 1>(0, 0)
+        diff.fixed_view_mut::<3, 1>(0, 0)
             .copy_from(&(position - self.position));
-        diff.fixed_slice_mut::<2, 1>(3, 0)
+        diff.fixed_view_mut::<2, 1>(3, 0)
             .copy_from(&(velocity - self.velocity.xy()));
 
         let mut var = OMatrix::<f32, U5, U5>::zeros();
-        var.fixed_slice_mut::<3, 3>(0, 0).copy_from(&position_var);
-        var.fixed_slice_mut::<2, 2>(3, 3).copy_from(&velocity_var);
+        var.fixed_view_mut::<3, 3>(0, 0).copy_from(&position_var);
+        var.fixed_view_mut::<2, 2>(3, 3).copy_from(&velocity_var);
 
         self.update(jacobian, diff, var)
     }
@@ -406,7 +414,7 @@ impl ESKF {
         variance: Matrix3<f32>,
     ) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
-        jacobian.fixed_slice_mut::<3, 3>(0, 0).fill_with_identity();
+        jacobian.fixed_view_mut::<3, 3>(0, 0).fill_with_identity();
         let diff = measurement - self.position;
         self.update(jacobian, diff, variance)
     }
@@ -414,7 +422,7 @@ impl ESKF {
     /// Update the filter with an observation of the height alone
     pub fn observe_height(&mut self, measured: f32, variance: f32) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U1, U18>::zeros();
-        jacobian.fixed_slice_mut::<1, 1>(0, 2).fill_with_identity();
+        jacobian.fixed_view_mut::<1, 1>(0, 2).fill_with_identity();
         let diff = OVector::<f32, U1>::new(measured - self.position.z);
         let var = OMatrix::<f32, U1, U1>::new(variance);
         self.update(jacobian, diff, var)
@@ -432,7 +440,7 @@ impl ESKF {
         variance: Matrix3<f32>,
     ) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
-        jacobian.fixed_slice_mut::<3, 3>(0, 3).fill_with_identity();
+        jacobian.fixed_view_mut::<3, 3>(0, 3).fill_with_identity();
         let diff = measurement - self.velocity;
         self.update(jacobian, diff, variance)
     }
@@ -449,7 +457,7 @@ impl ESKF {
         variance: Matrix2<f32>,
     ) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U2, U18>::zeros();
-        jacobian.fixed_slice_mut::<2, 2>(0, 3).fill_with_identity();
+        jacobian.fixed_view_mut::<2, 2>(0, 3).fill_with_identity();
         let diff = Vector2::new(
             measurement.x - self.velocity.x,
             measurement.y - self.velocity.y,
@@ -464,7 +472,7 @@ impl ESKF {
         variance: Matrix3<f32>,
     ) -> Result<()> {
         let mut jacobian = OMatrix::<f32, U3, U18>::zeros();
-        jacobian.fixed_slice_mut::<3, 3>(0, 6).fill_with_identity();
+        jacobian.fixed_view_mut::<3, 3>(0, 6).fill_with_identity();
         let diff = measurement * self.orientation;
         self.update(jacobian, diff.scaled_axis(), variance)
     }
