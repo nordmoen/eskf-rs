@@ -14,10 +14,10 @@ jobs:
       matrix:
         rust: [stable]
         os: [ubuntu-latest, macOS-latest, windows-latest]
-        features: [--features default, --no-default-features]
+        features: [--features default, --no-default-features --feature no_std]
         include:
           - {rust: nightly, os: ubuntu-latest, features: --features default}
-          - {rust: nightly, os: ubuntu-latest, features: --no-default-features}
+          - {rust: nightly, os: ubuntu-latest, features: --no-default-features --feature no_std}
     steps:
       - uses: actions/checkout@v2
 
