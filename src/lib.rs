@@ -76,13 +76,14 @@ pub type Delta = std::time::Duration;
 pub type Delta = f32;
 
 /// Builder for [`ESKF`]
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Builder {
     var_acc: Vector3<f32>,
     var_rot: Vector3<f32>,
     var_acc_bias: Vector3<f32>,
     var_rot_bias: Vector3<f32>,
     process_covariance: f32,
+    gravity: f32,
 }
 
 impl Builder {
@@ -157,11 +158,20 @@ impl Builder {
 
     /// Set the initial covariance for the process matrix
     ///
-    /// The covariance value should be a small process value so that the covariance of the filter
+    /// The covariance value should be a small process value so tha
+    /// t the covariance of the filter
     /// quickly converges to the correct value. Too small values could lead to the filter taking a
     /// long time to converge and report a lower covariance than what it should.
     pub fn initial_covariance(mut self, covar: f32) -> Self {
         self.process_covariance = covar;
+        self
+    }
+
+    /// Set the used gravity in m/s².
+    ///
+    /// The default value is 9.81 m/s².
+    pub fn gravity(mut self, gravity: f32) -> Self {
+        self.gravity = gravity;
         self
     }
 
@@ -173,11 +183,25 @@ impl Builder {
             orientation: UnitQuaternion::identity(),
             accel_bias: Vector3::zeros(),
             rot_bias: Vector3::zeros(),
+            gravity: Vector3::new(0.0, 0.0, self.gravity),
             covariance: OMatrix::<f32, U15, U15>::identity() * self.process_covariance,
             var_acc: self.var_acc,
             var_rot: self.var_rot,
             var_acc_bias: self.var_acc_bias,
             var_rot_bias: self.var_rot_bias,
+        }
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            var_acc: Default::default(),
+            var_rot: Default::default(),
+            var_acc_bias: Default::default(),
+            var_rot_bias: Default::default(),
+            process_covariance: Default::default(),
+            gravity: 9.81,
         }
     }
 }
@@ -207,6 +231,8 @@ pub struct ESKF {
     pub accel_bias: Vector3<f32>,
     /// Estimated rotation bias
     pub rot_bias: Vector3<f32>,
+    /// Gravity vector.
+    pub gravity: Vector3<f32>,
     /// Covariance of filter state
     covariance: OMatrix<f32, U15, U15>,
     /// Acceleration variance
@@ -270,7 +296,7 @@ impl ESKF {
         let rot_acc_grav = self
             .orientation
             .transform_vector(&(acceleration - self.accel_bias))
-            + GRAVITY;
+            + self.gravity;
         let norm_rot = UnitQuaternion::from_scaled_axis((rotation - self.rot_bias) * delta_t);
         let orient_mat = self.orientation.to_rotation_matrix().into_inner();
         // Update internal state kinematics
@@ -496,8 +522,6 @@ impl ESKF {
         self.update(jacobian, diff.scaled_axis(), variance)
     }
 }
-
-const GRAVITY: Vector3<f32> = Vector3::new(0f32, 0f32, 9.81);
 
 /// Create the skew-symmetric matrix from a vector
 #[rustfmt::skip]
