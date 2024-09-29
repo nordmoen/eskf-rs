@@ -334,10 +334,7 @@ impl ESKF {
         variance: OMatrix<f32, R, R>,
     ) -> Result<()>
     where
-        DefaultAllocator: Allocator<f32, R>
-            + Allocator<f32, R, R>
-            + Allocator<f32, R, U18>
-            + Allocator<f32, U18, R>,
+        DefaultAllocator: Allocator<R> + Allocator<R, R> + Allocator<R, U18> + Allocator<U18, R>,
     {
         // Correct filter based on Kalman gain
         let kalman_gain = self.covariance
