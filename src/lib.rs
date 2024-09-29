@@ -325,7 +325,7 @@ impl ESKF {
     /// # Arguments
     /// - `jacobian` is the measurement Jacobian matrix
     /// - `difference` is the difference between the measured sensor and the filter's internal
-    /// state
+    ///   state
     /// - `variance` is the uncertainty of the observation
     pub fn update<R: Dim>(
         &mut self,
