@@ -27,14 +27,14 @@ std = ["nalgebra/std"]
 no_std = ["nalgebra/libm", "dep:num-traits"]
 
 [dependencies]
-nalgebra = { version = "0.32.3", default-features = false }
+nalgebra = { version = "0.33.0", default-features = false }
 num-traits = { version = "0.2.17", optional = true, default-features = false, features = [
     "libm",
 ] }
 
 [dev-dependencies]
 approx = "0.5.0"
-nalgebra = { version = "0.32", features = ["serde-serialize", "debug"] }
+nalgebra = { version = "0.33.0", features = ["serde-serialize", "debug"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 plotly = "0.6.0"
